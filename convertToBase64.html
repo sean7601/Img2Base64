@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Base64 Image Converter (JPEG & PNG)</title>
+  <title>Base64 Image Converter with Quality Control</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -17,77 +17,254 @@
       text-align: center;
     }
     .container {
-      margin-bottom: 20px;
+      margin-bottom: 25px;
+      padding: 15px;
+      background-color: #fff;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     textarea {
-      width: 100%;
-      height: 200px;
+      width: calc(100% - 22px); /* Account for padding */
+      height: 150px;
       font-family: monospace;
       padding: 10px;
       resize: vertical;
+      border: 1px solid #ccc;
     }
     label {
       display: block;
       margin-bottom: 8px;
       font-weight: bold;
     }
+    input[type="text"], select {
+        width: calc(100% - 22px); /* Account for padding */
+        padding: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+    }
     button {
       padding: 10px 20px;
       font-size: 1rem;
       cursor: pointer;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      margin-right: 10px;
+    }
+    button:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+    }
+    button:hover:not(:disabled) {
+        background-color: #0056b3;
+    }
+    #imagePreviewContainer {
+        margin-top: 15px;
+        text-align: center;
+    }
+    #imagePreview {
+      max-width: 100%;
+      max-height: 300px;
+      margin-top: 10px;
+      border: 1px solid #eee;
+      display: none; /* Hidden initially */
+    }
+    .info {
+        font-size: 0.9em;
+        color: #555;
     }
   </style>
 </head>
 <body>
   <h1>Base64 Image Converter (JPEG & PNG)</h1>
-  
+
   <div class="container">
-    <label for="imageUpload">Select a .jpg, .jpeg, or .png image:</label>
+    <label for="imageUpload">1. Select a .jpg, .jpeg, or .png image:</label>
     <input type="file" id="imageUpload" accept=".jpg, .jpeg, .png">
   </div>
-  
+
   <div class="container">
-    <label for="base64Output">JavaScript Variable (Base64):</label>
-    <textarea id="base64Output" placeholder="The base64 string will appear here once you upload an image." readonly></textarea>
+    <label for="variableName">2. Define JavaScript variable name:</label>
+    <input type="text" id="variableName" value="imageDataUrl" placeholder="e.g., myImageBase64">
   </div>
-  
+
   <div class="container">
-    <button id="copyButton">Copy to Clipboard</button>
+    <label for="qualitySelect">3. Select image quality (reduces file size):</label>
+    <select id="qualitySelect">
+      <option value="1.0">Original (1x / ~100% JPEG Quality)</option>
+      <option value="0.85">Reduced 2x (~85% JPEG Quality)</option>
+      <option value="0.7">Reduced 5x (~70% JPEG Quality)</option>
+      <option value="0.5">Reduced 10x (~50% JPEG Quality)</option>
+      <option value="0.3">Reduced 20x (~30% JPEG Quality)</option>
+      <option value="0.1">Reduced 50x (~10% JPEG Quality)</option>
+    </select>
+    <p class="info">Lower quality significantly reduces file size, especially for photos. Preview below updates.</p>
+    <div id="imagePreviewContainer">
+        <label>Preview:</label>
+        <img id="imagePreview" alt="Image Preview">
+    </div>
   </div>
-  
-  <script>
-    document.getElementById('imageUpload').addEventListener('change', function() {
-      var file = this.files[0];
-      if (!file) return;
+
+  <div class="container">
+    <label for="base64Output">4. JavaScript Variable Output (Base64):</label>
+    <textarea id="base64Output" placeholder="Upload an image and select quality to see the result here." readonly></textarea>
+  </div>
+
+  <div class="container">
+    <button id="copyButton" disabled>Copy to Clipboard</button>
+  </div>
+
+ <script>
+    const imageUpload = document.getElementById('imageUpload');
+    const variableNameInput = document.getElementById('variableName');
+    const qualitySelect = document.getElementById('qualitySelect');
+    const base64Output = document.getElementById('base64Output');
+    const copyButton = document.getElementById('copyButton');
+    const imagePreview = document.getElementById('imagePreview');
+    const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+
+    let loadedImage = null;        // Stores the loaded Image object
+    let originalFileName = '';     // Stores the original file name for reference
+    let originalFileType = '';     // New: Stores the original file's type
+
+    // --- Helper function to process and display the image ---
+    function processImage() {
+      if (!loadedImage) return;
+
+      const quality = parseFloat(qualitySelect.value);
+      const varName = variableNameInput.value.trim() || 'imageDataUrl';
+      // Validate the variable name (starts with letter, $, or _; contains alphanumerics, $, _)
+      const validVarName = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(varName) ? varName : 'imageDataUrl';
+      if (varName !== validVarName) {
+          console.warn(`Invalid variable name "${varName}", using default "imageDataUrl".`);
+          variableNameInput.value = validVarName;
+      }
+
+      // Create a canvas and set its dimensions to the natural dimensions of the image
+      const canvas = document.createElement('canvas');
+      canvas.width = loadedImage.naturalWidth;
+      canvas.height = loadedImage.naturalHeight;
+      const ctx = canvas.getContext('2d');
+
+      // Option 1: For PNG images, preserve transparency by not adding any background.
+      // Option 2: For JPEG images, quality control is applied.
+      // Determine the output format based on the original file type:
+      const format = originalFileType === 'image/png' ? 'image/png' : 'image/jpeg';
+      // If using JPEG, you may want to fill the background to avoid unintended colors.
+      // For preserving the original "no background" look, we stick with PNG for transparent images.
+      if (format === 'image/jpeg') {
+        // Optionally, uncomment the next two lines to fill the background with white:
+        // ctx.fillStyle = "#fff";
+        // ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       
+      // Draw the loaded image onto the canvas
+      ctx.drawImage(loadedImage, 0, 0);
+
+      let dataURL;
+      try {
+          // Apply quality only for JPEG, as PNG does not support quality parameters
+          if (format === 'image/jpeg') {
+              dataURL = canvas.toDataURL(format, quality);
+          } else {
+              dataURL = canvas.toDataURL(format);
+          }
+      } catch (e) {
+          console.error("Error generating Data URL:", e);
+          alert("Could not process image. It might be too large or in an unsupported format after loading.");
+          return;
+      }
+
+      // Update the preview image
+      imagePreview.src = dataURL;
+      imagePreview.style.display = 'block';
+
+      // Generate the JavaScript variable declaration string
+      const jsVariable = `var ${validVarName} = '${dataURL}';`;
+      base64Output.value = jsVariable;
+
+      // Enable the copy button
+      copyButton.disabled = false;
+    }
+
+    // --- Event Listener for File Upload ---
+    imageUpload.addEventListener('change', function() {
+      var file = this.files[0];
+      if (!file) {
+        // Reset if no file is selected
+        loadedImage = null;
+        base64Output.value = '';
+        imagePreview.style.display = 'none';
+        copyButton.disabled = true;
+        return;
+      }
+
       // Accept only JPEG and PNG images.
       if (file.type !== 'image/jpeg' && file.type !== 'image/png') {
         alert("Please upload a .jpg, .jpeg, or .png image.");
+        this.value = ''; // Clear the input
         return;
       }
-      
-      var reader = new FileReader();
-      
+
+      originalFileName = file.name;
+      originalFileType = file.type;  // Capture the file type for later use
+
+      const reader = new FileReader();
+
       reader.onload = function(e) {
-        // The FileReader result is a Data URL (e.g., data:image/jpeg;base64,... or data:image/png;base64,...)
-        var dataURL = e.target.result;
-        // Extract the base64-encoded string (without the prefix)
-        var base64Str = dataURL.split(',')[1];
-        // Prepend "data:image/png;base64," to the base64 string regardless of the original type.
-        // Note: Using the png prefix for a jpeg image may yield unexpected results when displayed.
-        var jsVariable = "var imageDataUrl = 'data:image/png;base64," + base64Str + "';";
-        // Output the complete variable string into the textarea.
-        document.getElementById('base64Output').value = jsVariable;
+        loadedImage = new Image();
+        loadedImage.onload = () => {
+          processImage();
+        };
+        loadedImage.onerror = () => {
+            alert("Could not load the image. The file might be corrupted.");
+            loadedImage = null;
+            base64Output.value = '';
+            imagePreview.style.display = 'none';
+            copyButton.disabled = true;
+        };
+        loadedImage.src = e.target.result;
       };
-      
+
+      reader.onerror = () => {
+          alert("Error reading the file.");
+      };
+
       reader.readAsDataURL(file);
     });
-    
-    document.getElementById('copyButton').addEventListener('click', function() {
-      var outputField = document.getElementById('base64Output');
-      outputField.select();
-      document.execCommand('copy');
-      alert("Copied to clipboard!");
+
+    // --- Event Listener for Quality Change ---
+    qualitySelect.addEventListener('change', processImage);
+
+    // --- Event Listener for Variable Name Change ---
+    variableNameInput.addEventListener('input', processImage);
+
+    // --- Event Listener for Copy Button ---
+    copyButton.addEventListener('click', function() {
+      if (!base64Output.value) return;
+      base64Output.select();
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(base64Output.value)
+              .then(() => {
+                 alert("Copied to clipboard!");
+              })
+              .catch(err => {
+                console.error('Failed to copy with Clipboard API: ', err);
+                document.execCommand('copy');
+                alert("Copied to clipboard (using fallback method)!");
+              });
+        } else {
+            document.execCommand('copy');
+            alert("Copied to clipboard (using fallback method)!");
+        }
+      } catch (err) {
+        console.error('Failed to copy text: ', err);
+        alert("Failed to copy to clipboard.");
+      }
+      window.getSelection().removeAllRanges();
     });
   </script>
 </body>
